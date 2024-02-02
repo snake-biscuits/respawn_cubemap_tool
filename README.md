@@ -1,4 +1,4 @@
-# respawn_cubemap_vtf_tool
+# respawn_cubemap_tool
 
 Tools for extracting `materials/maps/*/cubemaps.hdr.vtf` files
 Can be used to pull cubemap textures from Titanfall 2 & Apex Legends maps
