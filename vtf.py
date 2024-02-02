@@ -259,7 +259,7 @@ dds_header = [
 dds_header_bytes = struct.pack("4s20I4s15I", *dds_header)
 
 
-def save_cubemap_mipmaps_as_dds(vtf: VTF):
+def save_cubemaps_as_dds(vtf: VTF):
     mipmaps = extract_cubemap_mipmaps(vtf)
     # cubemap.0-side.0-mip.0 ... cubemap.X-side.5-mip.X
     for cubemap_index, uuid in enumerate(CMA.from_vtf(vtf).as_json):
