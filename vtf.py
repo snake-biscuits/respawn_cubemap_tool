@@ -102,7 +102,7 @@ class Resource:
     def __repr__(self) -> str:
         tag_type = self.valid_tags[self.tag]
         if self.tag == b"CRC":
-            return f"<Resource | {tag_type} checksum={self.checksum:08X}>"
+            return f"<Resource | {tag_type} checksum=0x{self.checksum:08X}>"
         else:
             return f"<Resource | {tag_type} flags=0x{self.flags:02X} offset={self.offset}>"
 
@@ -201,7 +201,7 @@ class CMA:
     data: List[int]
 
     def __repr__(self) -> str:
-        return f"<CMA with {len(self.data)} entries at {id(self):012X}>"
+        return f"<CMA with {len(self.data)} entries at 0x{id(self):012X}>"
 
     @classmethod
     def from_vtf(cls, vtf: VTF):
@@ -218,7 +218,7 @@ class CMA:
 
     @property
     def as_json(self) -> List[str]:
-        return [f"{x:08X}" for x in self.data]
+        return [f"0x{x:08X}" for x in self.data]
 
 
 def extract_cubemap_mipmaps(vtf: VTF) -> Dict[Tuple[int, int, int], bytes]:
