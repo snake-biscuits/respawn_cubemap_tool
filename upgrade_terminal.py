@@ -102,7 +102,7 @@ if __name__ == "__main__":
             # -- flipped the order in the DDS class so they line up
 
     # GENERATE r2/.../cubemaps.hdr.vtf
-    os.makedirs("./r2/", exist_ok=True)  # new PakFile
+    flush_dir("./r2/")  # new PakFile
     r2_vtf = vtf.VTF()
     # TODO: set the entire .vtf header
     r2_vtf.flags = vtf.Flags.ENVMAP  # TODO:  CLAMP_S etc.
