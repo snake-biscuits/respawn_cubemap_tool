@@ -221,7 +221,30 @@ class CMA:
         return [f"0x{x:08X}" for x in self.data]
 
 
-def extract_cubemap_mipmaps(vtf: VTF) -> Dict[Tuple[int, int, int], bytes]:
+def extract_cubemap_mipmaps_r1(vtf: VTF) -> Dict[Tuple[int, int, int], bytes]:
+    """{(mip_index, cubemap_index, side_index): mip_bytes}"""
+    assert Flags.ENVMAP in vtf.flags
+    assert vtf.format == Format.RGBA_8888
+    assert vtf.size == (64, 64)
+    assert vtf.low_res_format == Format.NONE
+    assert vtf.low_res_size == (0, 0)
+    assert "Image Data" in vtf.resources
+    assert vtf.first_frame == 0
+    # NOTE: num_frames should always be 1, but keeping the same output format as r2 is nice
+    # mip.X-side.0-cubemap.0 ... mip.0-side.5-cubemap.X
+    offset = vtf.resources["Image Data"].offset
+    mip_sizes = [(1 << i) ** 2 * 4 for i in range(vtf.num_mipmaps)]
+    mipmaps = dict()
+    for mip_index in range(vtf.num_mipmaps):
+        for cubemap_index in range(vtf.num_frames):
+            for side_index in range(6):
+                mipmaps[(mip_index, cubemap_index, side_index)] = vtf.read(offset, mip_sizes[mip_index])
+                offset += mip_sizes[mip_index]
+    # TODO: assert offset == EOF
+    return mipmaps
+
+
+def extract_cubemap_mipmaps_r2(vtf: VTF) -> Dict[Tuple[int, int, int], bytes]:
     """{(mip_index, cubemap_index, side_index): mip_bytes}"""
     assert Flags.ENVMAP in vtf.flags
     assert vtf.format == Format.BC6H_UF16
@@ -240,6 +263,7 @@ def extract_cubemap_mipmaps(vtf: VTF) -> Dict[Tuple[int, int, int], bytes]:
             for side_index in range(6):
                 mipmaps[(mip_index, cubemap_index, side_index)] = vtf.read(offset, mip_sizes[mip_index])
                 offset += mip_sizes[mip_index]
+    # TODO: assert offset == EOF
     return mipmaps
 
 
@@ -259,8 +283,8 @@ dds_header = [
 dds_header_bytes = struct.pack("4s20I4s15I", *dds_header)
 
 
-def save_cubemaps_as_dds(vtf: VTF):
-    mipmaps = extract_cubemap_mipmaps(vtf)
+def save_r2_cubemaps_as_dds(vtf: VTF):
+    mipmaps = extract_cubemap_mipmaps_r2(vtf)
     # cubemap.0-side.0-mip.0 ... cubemap.X-side.5-mip.X
     for cubemap_index, uuid in enumerate(CMA.from_vtf(vtf).as_json):
         for side_index in range(6):
