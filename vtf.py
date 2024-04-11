@@ -8,33 +8,33 @@ from typing import Any, Dict, List, Tuple, Union
 
 class Format(enum.Enum):
     NONE = -1
-    RGBA8888 = 0
-    ABGR8888 = 2
-    RGB888 = 3
-    BGR888 = 4
-    RGB565 = 5
+    RGBA_8888 = 0
+    ABGR_8888 = 2
+    RGB_888 = 3
+    BGR_888 = 4
+    RGB_565 = 5
     I8 = 6
-    IA88 = 7
-    P8 = 8
-    A8 = 9
-    RGB888_BLUESCREEN = 10
-    BGR888_BLUESCREEN = 11
-    ARGB8888 = 12
-    BGRA8888 = 13
+    IA_88 = 7
+    P_8 = 8
+    A_8 = 9
+    RGB_888_BLUESCREEN = 10
+    BGR_888_BLUESCREEN = 11
+    ARGB_8888 = 12
+    BGRA_8888 = 13
     DXT1 = 14
     DXT3 = 15
     DXT5 = 16
-    BGRX8888 = 17
-    BGR565 = 18
-    BGRX5551 = 19
-    BGRA4444 = 20
+    BGRX_8888 = 17
+    BGR_565 = 18
+    BGRX_5551 = 19
+    BGRA_4444 = 20
     DXT1_ONE_BIT_ALPHA = 21
-    BGRA5551 = 22
-    UV88 = 23
-    UVWQ8888 = 24
-    RGBA16161616F = 25
-    RGBA16161616 = 26
-    UVLX8888 = 27
+    BGRA_5551 = 22
+    UV_88 = 23
+    UVWQ_8888 = 24
+    RGBA_16161616F = 25
+    RGBA_16161616 = 26
+    UVLX_8888 = 27
     ...
     BC6H_UF16 = 66  # cubemaps.hdr.vtf only
 
@@ -122,7 +122,7 @@ class VTF:
     reflectivity: Tuple[float, float, float]  # rgb
     bumpmap_scale: int
     format: Format
-    mipmap_count: int
+    num_mipmaps: int
     low_res_format: Format
     low_res_size: Tuple[int, int]  # width, height
     resources: List[Resource]
@@ -147,7 +147,7 @@ class VTF:
         return out
 
     @classmethod
-    def from_file(cls, filename) -> VTF:
+    def from_file(cls, filename: str) -> VTF:
         out = cls()
         out.filename = filename
         with open(filename, "rb") as vtf_file:
