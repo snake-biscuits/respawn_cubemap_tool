@@ -1,6 +1,7 @@
 # https://learn.microsoft.com/en-us/windows/win32/direct3ddds/dds-file-layout-for-cubic-environment-maps
 from __future__ import annotations
 import enum
+import os
 import struct
 from typing import Any, List, Tuple, Union
 
@@ -27,18 +28,19 @@ class DDS:
     size: Tuple[int, int]  # width, height
     num_mipmaps: int
     # DX10 extended header
-    dxgi_format: DXGI
+    format: DXGI
     resource_dimension: int  # always 3?
     misc_flag: int  # TODO: enum
     # pixel data
     mipmaps: List[bytes]
 
+    def __init__(self):
+        self.mipmaps = list()
+
     def __repr__(self) -> str:
-        major, minor = self.version
-        version = f"v{major}.{minor}"
         width, height = self.size
         size = f"{width}x{height}"
-        return f"<VTF {version} '{self.filename}' {size} {self.format.name} flags={self.flags.name}>"
+        return f"<DDS '{self.filename}' {size} {self.format.name}>"
 
     # NOTE: sizeof(header) + sizeof(extended_header) = 148 (start of mips)
     def read(self, offset: int, length: int) -> bytes:
@@ -68,16 +70,15 @@ class DDS:
             assert dds_file.read(20) == b"\0" * 20
             assert read_struct(dds_file, "I") == 0x00401008  # idk, some flags?
             assert dds_file.read(16) == b"\0" * 16
-            out.dxgi_format = DXGI(read_struct(dds_file, "I"))
+            out.format = DXGI(read_struct(dds_file, "I"))
             out.resource_dimension = read_struct(dds_file, "I")
             out.misc_flag = read_struct(dds_file, "I")
             out.array_size = read_struct(dds_file, "I")
             assert dds_file.read(4) == b"\0" * 4  # reserved
             # pixel data
-            if out.dxgi_format == DXGI.BC6H_UF16:
+            if out.format == DXGI.BC6H_UF16:
                 assert out.array_size == 1  # pls no
                 mip_sizes = [max(1 << i, 4) ** 2 for i in range(out.num_mipmaps)]
-                out.mipmaps = list()
                 for mip_size in reversed(mip_sizes):
                     out.mipmaps.append(dds_file.read(mip_size))
                 out.mipmaps = out.mipmaps[::-1]  # biggest first
@@ -86,6 +87,7 @@ class DDS:
         return out
 
     def save_as(self, filename: str):
+        os.makedirs(os.path.dirname(filename), exist_ok=True)
         with open(filename, "wb") as dds_file:
             # header
             write_struct(dds_file, "4s", b"DDS ")
@@ -100,7 +102,7 @@ class DDS:
             write_struct(dds_file, "20s", b"\0" * 20)
             assert read_struct(dds_file, "I") == 0x00401008  # idk, some flags?
             assert dds_file.read(16) == b"\0" * 16
-            write_struct(dds_file, "I", self.dxgi_format.value)
+            write_struct(dds_file, "I", self.format.value)
             write_struct(dds_file, "I", self.resource_dimension)
             write_struct(dds_file, "I", self.misc_flag)
             write_struct(dds_file, "I", self.array_size)

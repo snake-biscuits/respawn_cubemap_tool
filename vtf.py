@@ -2,6 +2,7 @@
 # https://github.com/NeilJed/VTFLib/blob/main/VTFLib/VTFFormat.h
 from __future__ import annotations
 import enum
+import os
 import struct
 from typing import Any, Dict, List, Tuple, Union
 
@@ -74,6 +75,10 @@ def read_struct(file, format_: str) -> Union[Any, List[Any]]:
     return out
 
 
+def write_struct(file, format_: str, *args):
+    file.write(struct.pack(format_, *args))
+
+
 class Resource:
     tag: bytes
     flags: int  # 0x2 = NO_DATA
@@ -110,11 +115,13 @@ class Resource:
     def from_stream(cls, vtf_file) -> Resource:
         return cls(*read_struct(vtf_file, "3sBI"))
 
+    def as_bytes(self) -> bytes:
+        return struct.pack("3sBI", self.tag, self.flags, self.offset)
+
 
 class VTF:
     filename: str
     version: Tuple[int, int]
-    header_size: int
     size: Tuple[int, int]  # width, height
     flags: Flags
     num_frames: int
@@ -129,6 +136,9 @@ class VTF:
     # pull the textures yourself
     # -- header to locate
     # -- .read() to extract
+
+    def __init__(self):
+        self.mipmaps = dict()
 
     def __repr__(self) -> str:
         major, minor = self.version
@@ -155,7 +165,7 @@ class VTF:
             out.version = read_struct(vtf_file, "2I")
             if out.version != (7, 5):
                 raise NotImplementedError(f"v{out.version[0]}.{out.version[1]} is not supported!")
-            out.header_size = read_struct(vtf_file, "I")
+            header_size = read_struct(vtf_file, "I")
             out.size = read_struct(vtf_file, "2H")
             out.flags = Flags(read_struct(vtf_file, "I"))
             out.num_frames, out.first_frame = read_struct(vtf_file, "2H")
@@ -165,7 +175,7 @@ class VTF:
             out.bumpmap_scale = read_struct(vtf_file, "f")
             out.format = Format(read_struct(vtf_file, "I"))
             out.num_mipmaps = read_struct(vtf_file, "B")
-            out.low_res_format = Format(read_struct(vtf_file, "i"))  # always DXT1
+            out.low_res_format = Format(read_struct(vtf_file, "i"))
             out.low_res_size = read_struct(vtf_file, "2B")
             # v7.2+
             out.mipmap_depth = read_struct(vtf_file, "H")
@@ -175,14 +185,36 @@ class VTF:
             assert vtf_file.read(8) == b"\0" * 8
             resources = [Resource.from_stream(vtf_file) for i in range(num_resources)]
             out.resources = {Resource.valid_tags[r.tag]: r for r in resources}
-            assert vtf_file.tell() == out.header_size
+            assert vtf_file.tell() == header_size
+            # TODO: out.cma (if present)
+            # mipmaps
+            assert Flags.ENVMAP in out.flags
+            assert out.low_res_format == Format.NONE
+            assert out.low_res_size == (0, 0)
+            assert out.first_frame == 0
+            assert "Image Data" in out.resources
+            vtf_file.seek(out.resources["Image Data"].offset)
+            # Titanfall
+            if out.format == Format.RGBA_8888 and out.size == (64, 64):
+                mip_sizes = [(1 << i) ** 2 * 4 for i in range(out.num_mipmaps)]
+            # Titanfall 2
+            elif out.format == Format.BC6H_UF16 and out.size == (256, 256):
+                mip_sizes = [max(1 << i, 4) ** 2 for i in range(out.num_mipmaps)]
+                # TODO: UserWarning("use .read(offset, size) to get the mipmaps yourself")
+                return out  # exit early
+            # parse mipmaps
+            # mip.X-side.0-cubemap.0 ... mip.0-side.5-cubemap.X
+            for mip_index in range(out.num_mipmaps):
+                for cubemap_index in range(out.num_frames):
+                    for side_index in range(6):
+                        out.mipmaps[(mip_index, cubemap_index, side_index)] = vtf_file.read(mip_sizes[mip_index])
+            # TODO: assert EOF reached
         return out
 
     @property
     def as_json(self) -> Dict[str, Any]:
         return {
             "version": self.version,
-            "header_size": self.header_size,
             "size": self.size,
             "flags": self.flags.name,
             "num_frames": self.num_frames,
@@ -190,11 +222,59 @@ class VTF:
             "reflectivity": self.reflectivity,
             "bumpmap_scale": self.bumpmap_scale,
             "format": self.format.name,
-            "num_mipmap": self.num_mipmaps,
+            "num_mipmaps": self.num_mipmaps,
             "low_res_format": self.low_res_format.name,
             "low_res_size": self.low_res_size,
             "mipmap_depth": self.mipmap_depth,
             "resources": {k: str(v) for k, v in self.resources.items()}}
+
+    def save_as(self, filename: str):
+        assert self.version == (7, 5)
+        os.makedirs(os.path.dirname(filename), exist_ok=True)
+        with open(filename, "wb") as vtf_file:
+            # header
+            vtf_file.write(b"VTF\0")
+            write_struct(vtf_file, "2I", *self.version)
+            header_size = 80 + len(self.resources) * 8
+            write_struct(vtf_file, "I", header_size)
+            write_struct(vtf_file, "2H", *self.size)
+            write_struct(vtf_file, "I", self.flags.value)
+            write_struct(vtf_file, "2H", self.num_frames, self.first_frame)
+            vtf_file.write(b"\0" * 4)
+            write_struct(vtf_file, "3f", *self.reflectivity)
+            vtf_file.write(b"\0" * 4)
+            write_struct(vtf_file, "f", self.bumpmap_scale)
+            write_struct(vtf_file, "I", self.format.value)
+            write_struct(vtf_file, "B", self.num_mipmaps)
+            write_struct(vtf_file, "i", self.low_res_format.value)
+            write_struct(vtf_file, "2B", *self.low_res_size)
+            # v7.2+
+            write_struct(vtf_file, "H", self.mipmap_depth)
+            # v7.3+
+            vtf_file.write(b"\0" * 3)
+            write_struct(vtf_file, "I", len(self.resources))
+            vtf_file.write(b"\0" * 8)
+            # TODO: verify / calculate resource offsets
+            if set(self.resources.keys()) == {"Image Data"}:
+                self.resources["Image Data"].offset = header_size
+            else:
+                # "Cyclic Redundancy Check" stores it's data in "offset"
+                # if self.num_frames == 1: resources["Cubemap Mystery Attribute"] = cma_hash
+                # else: [cma_hash for i in range(self.num_frames)] w/ offset to data
+                # "Image Data" is always last!
+                raise NotImplementedError("idk how to generate CRC & CMA data")
+            vtf_file.write(b"".join(r.as_bytes() for r in self.resources.values()))
+            assert vtf_file.tell() == header_size
+            # TODO: resource data (CMA block)
+            # write mips
+            assert "Image Data" in self.resources
+            assert self.resources["Image Data"].offset == vtf_file.tell()
+            assert Flags.ENVMAP in self.flags
+            vtf_file.write(b"".join([  # sorted mips
+                self.mipmaps[(mipmap_index, cubemap_index, face_index)]
+                for mipmap_index in range(self.num_mipmaps)
+                for cubemap_index in range(self.num_frames)
+                for face_index in range(6)]))
 
 
 class CMA:
@@ -219,76 +299,3 @@ class CMA:
     @property
     def as_json(self) -> List[str]:
         return [f"0x{x:08X}" for x in self.data]
-
-
-def extract_cubemap_mipmaps_r1(vtf: VTF) -> Dict[Tuple[int, int, int], bytes]:
-    """{(mip_index, cubemap_index, side_index): mip_bytes}"""
-    assert Flags.ENVMAP in vtf.flags
-    assert vtf.format == Format.RGBA_8888
-    assert vtf.size == (64, 64)
-    assert vtf.low_res_format == Format.NONE
-    assert vtf.low_res_size == (0, 0)
-    assert "Image Data" in vtf.resources
-    assert vtf.first_frame == 0
-    # NOTE: num_frames should always be 1, but keeping the same output format as r2 is nice
-    # mip.X-side.0-cubemap.0 ... mip.0-side.5-cubemap.X
-    offset = vtf.resources["Image Data"].offset
-    mip_sizes = [(1 << i) ** 2 * 4 for i in range(vtf.num_mipmaps)]
-    mipmaps = dict()
-    for mip_index in range(vtf.num_mipmaps):
-        for cubemap_index in range(vtf.num_frames):
-            for side_index in range(6):
-                mipmaps[(mip_index, cubemap_index, side_index)] = vtf.read(offset, mip_sizes[mip_index])
-                offset += mip_sizes[mip_index]
-    # TODO: assert offset == EOF
-    return mipmaps
-
-
-def extract_cubemap_mipmaps_r2(vtf: VTF) -> Dict[Tuple[int, int, int], bytes]:
-    """{(mip_index, cubemap_index, side_index): mip_bytes}"""
-    assert Flags.ENVMAP in vtf.flags
-    assert vtf.format == Format.BC6H_UF16
-    assert vtf.size == (256, 256)
-    assert vtf.low_res_format == Format.NONE
-    assert vtf.low_res_size == (0, 0)
-    assert "Cubemap Mystery Attributes" in vtf.resources
-    assert "Image Data" in vtf.resources
-    assert vtf.first_frame == 0
-    # mip.X-side.0-cubemap.0 ... mip.0-side.5-cubemap.X
-    offset = vtf.resources["Image Data"].offset
-    mip_sizes = [max(1 << i, 4) ** 2 for i in range(vtf.num_mipmaps)]
-    mipmaps = dict()
-    for mip_index in range(vtf.num_mipmaps):
-        for cubemap_index in range(vtf.num_frames):
-            for side_index in range(6):
-                mipmaps[(mip_index, cubemap_index, side_index)] = vtf.read(offset, mip_sizes[mip_index])
-                offset += mip_sizes[mip_index]
-    # TODO: assert offset == EOF
-    return mipmaps
-
-
-# https://learn.microsoft.com/en-us/windows/win32/direct3ddds/dds-file-layout-for-cubic-environment-maps
-dds_header = [
-    b"DDS ", 0x7C, 0x000A1007,
-    256, 256, 0x00010000, 0x01, 9,  # height, width, pitch_or_linsize, num_mipmaps
-    *(0,) * 11, 0x20, 0x04,
-    b"DX10", *(0,) * 5,
-    0x00401008, *(0,) * 4,
-    # DX10 extended header
-    0x5F, 0x03, 0x00, 0x01, 0x00]  # dxgi_format, resource_dimension, misc_flag, array_size, reserved
-# NOTE: should be misc_flag, array_size = 0x04, 6
-# -- however this breaks in paint.net & that's what I'm using to view .dds files
-# -- so 1 .dds per cubemap side it is
-
-dds_header_bytes = struct.pack("4s20I4s15I", *dds_header)
-
-
-def save_r2_cubemaps_as_dds(vtf: VTF):
-    mipmaps = extract_cubemap_mipmaps_r2(vtf)
-    # cubemap.0-side.0-mip.0 ... cubemap.X-side.5-mip.X
-    for cubemap_index, uuid in enumerate(CMA.from_vtf(vtf).as_json):
-        for side_index in range(6):
-            with open(f"{vtf.filename}.{cubemap_index}.{uuid}.{side_index}.dds", "wb") as dds_file:
-                dds_file.write(dds_header_bytes)
-                for mip_index in reversed(range(vtf.num_mipmaps)):
-                    dds_file.write(mipmaps[(mip_index, cubemap_index, side_index)])
