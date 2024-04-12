@@ -10,34 +10,34 @@ from typing import Any, Dict, List, Tuple, Union
 class Format(enum.Enum):
     NONE = -1
     RGBA_8888 = 0
-    ABGR_8888 = 2
-    RGB_888 = 3
-    BGR_888 = 4
-    RGB_565 = 5
-    I8 = 6
-    IA_88 = 7
-    P_8 = 8
-    A_8 = 9
-    RGB_888_BLUESCREEN = 10
-    BGR_888_BLUESCREEN = 11
-    ARGB_8888 = 12
-    BGRA_8888 = 13
-    DXT1 = 14
-    DXT3 = 15
-    DXT5 = 16
-    BGRX_8888 = 17
-    BGR_565 = 18
-    BGRX_5551 = 19
-    BGRA_4444 = 20
-    DXT1_ONE_BIT_ALPHA = 21
-    BGRA_5551 = 22
-    UV_88 = 23
-    UVWQ_8888 = 24
-    RGBA_16161616F = 25
-    RGBA_16161616 = 26
-    UVLX_8888 = 27
+    ABGR_8888 = 1
+    RGB_888 = 2
+    BGR_888 = 3
+    RGB_565 = 4
+    I8 = 5
+    IA_88 = 6
+    P_8 = 7
+    A_8 = 8
+    RGB_888_BLUESCREEN = 9
+    BGR_888_BLUESCREEN = 10
+    ARGB_8888 = 11
+    BGRA_8888 = 12
+    DXT1 = 13
+    DXT3 = 14
+    DXT5 = 15
+    BGRX_8888 = 16
+    BGR_565 = 17
+    BGRX_5551 = 18
+    BGRA_4444 = 19
+    DXT1_ONE_BIT_ALPHA = 20
+    BGRA_5551 = 21
+    UV_88 = 22
+    UVWQ_8888 = 23
+    RGBA_16161616F = 24
+    RGBA_16161616 = 25
+    UVLX_8888 = 26
     ...
-    BC6H_UF16 = 66  # cubemaps.hdr.vtf only
+    BC6H_UF16 = 66  # r2 / r5 cubemaps.hdr.vtf only
 
 
 class Flags(enum.IntFlag):
@@ -200,6 +200,10 @@ class VTF:
             # Titanfall 2
             elif out.format == Format.BC6H_UF16 and out.size == (256, 256):
                 mip_sizes = [max(1 << i, 4) ** 2 for i in range(out.num_mipmaps)]
+            # TODO: r1o 32x32 Format.DXT5 "cubemapdefault.vtf" (LDR)
+            # TODO: r1o 32x32 Format.RGBA_16161616F "cubemapdefault.hdr.vtf" (HDR)
+            # -- mip bytes are all zero afaik
+            else:
                 # TODO: UserWarning("use .read(offset, size) to get the mipmaps yourself")
                 return out  # exit early
             # parse mipmaps
