@@ -131,11 +131,11 @@ if __name__ == "__main__":
     # GENERATE PAKFILE
     # p0358 has the exact PakFile spec figured out:
     # -- https://github.com/MRVN-Radiant/MRVN-Radiant/issues/55#issuecomment-2016653142
-    pakfile_name = f"{bsp.filename[:-4]}.PakFile.zip"
-    if os.path.exists(pakfile_name):
-        os.remove(pakfile_name)
-    subprocess.run(f"zip -0 --recurse-paths --no-dir-entries --junk-sfx --filesync -X ../{pakfile_name} .", cwd="./r2/")
-
-    # TODO: overwrite PakFile in a target .bsp
+    # NOTE: we don't need to generate a PakFile, we can mount "./r2/materials/" instead
+    # pakfile_name = f"{bsp.filename[:-4]}.PakFile.zip"
+    # if os.path.exists(pakfile_name):
+    #     os.remove(pakfile_name)
+    # subprocess.run(f"zip -0 --recurse-paths --no-dir-entries --junk-sfx --filesync -X ../{pakfile_name} .",
+    #                cwd="./r2/")
 
     print("-===- regen complete -===-")
