@@ -61,6 +61,22 @@ class DDS:
             assert dds_file.tell() == offset + length, f"read past EOF ({dds_file.tell()})"
         return out
 
+    def split(self):
+        assert self.filename.endswith(".dds")
+        base_filename = self.filename[:-4]
+        for i in range(self.array_size):
+            child = DDS()
+            child.array_size = 1
+            child.format = self.format
+            child.misc_flag = self.misc_flag
+            child.num_mipmaps = self.num_mipmaps
+            child.resource_dimension = self.resource_dimension
+            child.size = self.size
+            start = i * self.num_mipmaps
+            end = (i + 1) * self.num_mipmaps
+            child.mipmaps = self.mipmaps[start:end]
+            child.save_as(f"{base_filename}.{i}.dds")
+
     @classmethod
     def from_file(cls, filename: str) -> DDS:
         out = cls()
