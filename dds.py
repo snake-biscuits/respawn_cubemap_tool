@@ -31,11 +31,20 @@ class DDS:
     format: DXGI
     resource_dimension: int  # always 3?
     misc_flag: int  # TODO: enum
+    array_size: int
     # pixel data
     mipmaps: List[bytes]
 
     def __init__(self):
         self.mipmaps = list()
+        # defaults
+        self.array_size = 1
+        self.filename = "untitled.dds"
+        self.format = DXGI.BC6H_UF16
+        self.misc_flag = 0
+        self.num_mipmaps = 0
+        self.resource_dimension = 3
+        self.size = (0, 0)
 
     def __repr__(self) -> str:
         width, height = self.size
@@ -77,11 +86,12 @@ class DDS:
             assert dds_file.read(4) == b"\0" * 4  # reserved
             # pixel data
             if out.format == DXGI.BC6H_UF16:
-                assert out.array_size == 1  # pls no
                 mip_sizes = [max(1 << i, 4) ** 2 for i in range(out.num_mipmaps)]
-                for mip_size in reversed(mip_sizes):
-                    out.mipmaps.append(dds_file.read(mip_size))
-                out.mipmaps = out.mipmaps[::-1]  # biggest first
+                for i in range(out.array_size):
+                    mipmaps = [
+                        dds_file.read(mip_size)
+                        for mip_size in reversed(mip_sizes)]
+                    out.mipmaps.extend(mipmaps[::-1])  # biggest first
             else:
                 raise NotImplementedError("compression size unknown, cannot extract mipmaps")
         return out
@@ -100,14 +110,14 @@ class DDS:
             # DX10 extended header
             write_struct(dds_file, "4s", b"DX10")
             write_struct(dds_file, "20s", b"\0" * 20)
-            assert read_struct(dds_file, "I") == 0x00401008  # idk, some flags?
-            assert dds_file.read(16) == b"\0" * 16
+            write_struct(dds_file, "I", 0x00401008)  # idk, some flags?
+            write_struct(dds_file, "16s", b"\0" * 16)
             write_struct(dds_file, "I", self.format.value)
             write_struct(dds_file, "I", self.resource_dimension)
             write_struct(dds_file, "I", self.misc_flag)
             write_struct(dds_file, "I", self.array_size)
-            assert dds_file.read(4) == b"\0" * 4  # reserved
+            write_struct(dds_file, "4s", b"\0" * 4)  # reserved
             # pixel data
-            assert self.array_size == 1  # pls no
-            for i in reversed(range(self.num_mipmaps)):
-                dds_file.write(self.mipmaps[i])
+            for i in range(self.array_size):
+                for j in reversed(range(self.num_mipmaps)):
+                    dds_file.write(self.mipmaps[j])
