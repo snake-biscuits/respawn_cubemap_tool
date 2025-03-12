@@ -136,9 +136,17 @@ class VTF:
     resources: List[Resource]
     mipmaps: Dict[Tuple[int, int, int], bytes]
     # ^ {(mip_index, cubemap_index, side_index): raw_mipmap_data}
+    cma: Union[None, CMA]
 
     def __init__(self):
         self.mipmaps = dict()
+        # defaults
+        self.filename = "untitled.vtf"
+        self.version = (7, 5)
+        self.format = Format.NONE
+        self.flags = Flags(0x00)  # self.flags.name will be a blank string
+        self.size = (0, 0)
+        self.cma = None
 
     def __repr__(self) -> str:
         major, minor = self.version
@@ -146,15 +154,6 @@ class VTF:
         width, height = self.size
         size = f"{width}x{height}"
         return f"<VTF {version} '{self.filename}' {size} {self.format.name} flags={self.flags.name}>"
-
-    def read(self, offset: int, length: int) -> bytes:
-        """pull data after initial header parse"""
-        with open(self.filename, "rb") as vtf_file:
-            vtf_file.seek(offset)
-            assert vtf_file.tell() == offset, f"offset is past EOF ({vtf_file.tell()})"
-            out = vtf_file.read(length)
-            assert vtf_file.tell() == offset + length, f"read past EOF ({vtf_file.tell()})"
-        return out
 
     @classmethod
     def from_bytes(cls, raw_vtf: bytes) -> VTF:
@@ -195,7 +194,9 @@ class VTF:
         resources = [Resource.from_stream(vtf_file) for i in range(num_resources)]
         out.resources = {Resource.valid_tags[r.tag]: r for r in resources}
         assert vtf_file.tell() == header_size
-        # TODO: out.cma (if present)
+        if "Cubemap Mystery Attributes" in out.resources:
+            out.cma = CMA.from_vtf_stream(out, vtf_file)
+            vtf_file.seek(header_size)
         # mipmaps
         assert Flags.ENVMAP in out.flags
         assert out.low_res_format == Format.NONE
@@ -217,10 +218,11 @@ class VTF:
             return out  # exit early
         # parse mipmaps
         # mip.X-side.0-cubemap.0 ... mip.0-side.5-cubemap.X
-        for mip_index in range(out.num_mipmaps):
-            for cubemap_index in range(out.num_frames):
-                for side_index in range(6):
-                    out.mipmaps[(mip_index, cubemap_index, side_index)] = vtf_file.read(mip_sizes[mip_index])
+        out.mipmaps = {
+            (mip_index, cubemap_index, side_index): vtf_file.read(mip_sizes[mip_index])
+            for mip_index in range(out.num_mipmaps)
+            for cubemap_index in range(out.num_frames)
+            for side_index in range(6)}
         # TODO: assert EOF reached
         return out
 
@@ -297,7 +299,7 @@ class CMA:
         return f"<CMA with {len(self.data)} entries at 0x{id(self):012X}>"
 
     @classmethod
-    def from_vtf(cls, vtf: VTF):
+    def from_vtf_stream(cls, vtf: VTF, vtf_file: io.BytesIO):
         assert "Cubemap Mystery Attributes" in vtf.resources
         resource = vtf.resources["Cubemap Mystery Attributes"]
         out = cls()
@@ -305,7 +307,8 @@ class CMA:
             out.data = [resource.offset]
         else:
             num_ints = vtf.num_frames + 1
-            size, *out.data = struct.unpack(f"{num_ints}I", vtf.read(resource.offset, 4 * num_ints))
+            vtf_file.seek(resource.offset)
+            size, *out.data = read_struct(vtf_file, f"{num_ints}I")
             assert size == vtf.num_frames * 4
         return out
 
