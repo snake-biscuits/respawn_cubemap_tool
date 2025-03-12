@@ -2,6 +2,7 @@
 # https://github.com/NeilJed/VTFLib/blob/main/VTFLib/VTFFormat.h
 from __future__ import annotations
 import enum
+import io
 import os
 import struct
 from typing import Any, Dict, List, Tuple, Union
@@ -133,9 +134,8 @@ class VTF:
     low_res_format: Format
     low_res_size: Tuple[int, int]  # width, height
     resources: List[Resource]
-    # pull the textures yourself
-    # -- header to locate
-    # -- .read() to extract
+    mipmaps: Dict[Tuple[int, int, int], bytes]
+    # ^ {(mip_index, cubemap_index, side_index): raw_mipmap_data}
 
     def __init__(self):
         self.mipmaps = dict()
@@ -157,62 +157,71 @@ class VTF:
         return out
 
     @classmethod
+    def from_bytes(cls, raw_vtf: bytes) -> VTF:
+        return cls.from_stream(io.BytesIO(raw_vtf))
+
+    @classmethod
     def from_file(cls, filename: str) -> VTF:
-        out = cls()
-        out.filename = filename
         with open(filename, "rb") as vtf_file:
-            assert vtf_file.read(4) == b"VTF\0"
-            out.version = read_struct(vtf_file, "2I")
-            if out.version != (7, 5):
-                raise NotImplementedError(f"v{out.version[0]}.{out.version[1]} is not supported!")
-            header_size = read_struct(vtf_file, "I")
-            out.size = read_struct(vtf_file, "2H")
-            out.flags = Flags(read_struct(vtf_file, "I"))
-            out.num_frames, out.first_frame = read_struct(vtf_file, "2H")
-            assert vtf_file.read(4) == b"\0" * 4
-            out.reflectivity = read_struct(vtf_file, "3f")
-            assert vtf_file.read(4) == b"\0" * 4
-            out.bumpmap_scale = read_struct(vtf_file, "f")
-            out.format = Format(read_struct(vtf_file, "I"))
-            out.num_mipmaps = read_struct(vtf_file, "B")
-            out.low_res_format = Format(read_struct(vtf_file, "i"))
-            out.low_res_size = read_struct(vtf_file, "2B")
-            # v7.2+
-            out.mipmap_depth = read_struct(vtf_file, "H")
-            # v7.3+
-            assert vtf_file.read(3) == b"\0" * 3
-            num_resources = read_struct(vtf_file, "I")
-            assert vtf_file.read(8) == b"\0" * 8
-            resources = [Resource.from_stream(vtf_file) for i in range(num_resources)]
-            out.resources = {Resource.valid_tags[r.tag]: r for r in resources}
-            assert vtf_file.tell() == header_size
-            # TODO: out.cma (if present)
-            # mipmaps
-            assert Flags.ENVMAP in out.flags
-            assert out.low_res_format == Format.NONE
-            assert out.low_res_size == (0, 0)
-            assert out.first_frame == 0
-            assert "Image Data" in out.resources
-            vtf_file.seek(out.resources["Image Data"].offset)
-            # Titanfall
-            if out.format == Format.RGBA_8888 and out.size == (64, 64):
-                mip_sizes = [(1 << i) ** 2 * 4 for i in range(out.num_mipmaps)]
-            # Titanfall 2
-            elif out.format == Format.BC6H_UF16 and out.size == (256, 256):
-                mip_sizes = [max(1 << i, 4) ** 2 for i in range(out.num_mipmaps)]
-            # TODO: r1o 32x32 Format.DXT5 "cubemapdefault.vtf" (LDR)
-            # TODO: r1o 32x32 Format.RGBA_16161616F "cubemapdefault.hdr.vtf" (HDR)
-            # -- mip bytes are all zero afaik
-            else:
-                # TODO: UserWarning("use .read(offset, size) to get the mipmaps yourself")
-                return out  # exit early
-            # parse mipmaps
-            # mip.X-side.0-cubemap.0 ... mip.0-side.5-cubemap.X
-            for mip_index in range(out.num_mipmaps):
-                for cubemap_index in range(out.num_frames):
-                    for side_index in range(6):
-                        out.mipmaps[(mip_index, cubemap_index, side_index)] = vtf_file.read(mip_sizes[mip_index])
-            # TODO: assert EOF reached
+            out = cls.from_stream(vtf_file)
+        out.filename = filename
+        return out
+
+    @classmethod
+    def from_stream(cls, vtf_file: io.BytesIO) -> VTF:
+        out = cls()
+        assert vtf_file.read(4) == b"VTF\0"
+        out.version = read_struct(vtf_file, "2I")
+        if out.version != (7, 5):
+            raise NotImplementedError(f"v{out.version[0]}.{out.version[1]} is not supported!")
+        header_size = read_struct(vtf_file, "I")
+        out.size = read_struct(vtf_file, "2H")
+        out.flags = Flags(read_struct(vtf_file, "I"))
+        out.num_frames, out.first_frame = read_struct(vtf_file, "2H")
+        assert vtf_file.read(4) == b"\0" * 4
+        out.reflectivity = read_struct(vtf_file, "3f")
+        assert vtf_file.read(4) == b"\0" * 4
+        out.bumpmap_scale = read_struct(vtf_file, "f")
+        out.format = Format(read_struct(vtf_file, "I"))
+        out.num_mipmaps = read_struct(vtf_file, "B")
+        out.low_res_format = Format(read_struct(vtf_file, "i"))
+        out.low_res_size = read_struct(vtf_file, "2B")
+        # v7.2+
+        out.mipmap_depth = read_struct(vtf_file, "H")
+        # v7.3+
+        assert vtf_file.read(3) == b"\0" * 3
+        num_resources = read_struct(vtf_file, "I")
+        assert vtf_file.read(8) == b"\0" * 8
+        resources = [Resource.from_stream(vtf_file) for i in range(num_resources)]
+        out.resources = {Resource.valid_tags[r.tag]: r for r in resources}
+        assert vtf_file.tell() == header_size
+        # TODO: out.cma (if present)
+        # mipmaps
+        assert Flags.ENVMAP in out.flags
+        assert out.low_res_format == Format.NONE
+        assert out.low_res_size == (0, 0)
+        assert out.first_frame == 0
+        assert "Image Data" in out.resources
+        vtf_file.seek(out.resources["Image Data"].offset)
+        # Titanfall
+        if out.format == Format.RGBA_8888 and out.size == (64, 64):
+            mip_sizes = [(1 << i) ** 2 * 4 for i in range(out.num_mipmaps)]
+        # Titanfall 2
+        elif out.format == Format.BC6H_UF16 and out.size == (256, 256):
+            mip_sizes = [max(1 << i, 4) ** 2 for i in range(out.num_mipmaps)]
+        # TODO: r1o 32x32 Format.DXT5 "cubemapdefault.vtf" (LDR)
+        # TODO: r1o 32x32 Format.RGBA_16161616F "cubemapdefault.hdr.vtf" (HDR)
+        # -- mip bytes are all zero afaik
+        else:
+            # TODO: UserWarning("use .read(offset, size) to get the mipmaps yourself")
+            return out  # exit early
+        # parse mipmaps
+        # mip.X-side.0-cubemap.0 ... mip.0-side.5-cubemap.X
+        for mip_index in range(out.num_mipmaps):
+            for cubemap_index in range(out.num_frames):
+                for side_index in range(6):
+                    out.mipmaps[(mip_index, cubemap_index, side_index)] = vtf_file.read(mip_sizes[mip_index])
+        # TODO: assert EOF reached
         return out
 
     @property

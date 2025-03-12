@@ -1,6 +1,7 @@
 # https://learn.microsoft.com/en-us/windows/win32/direct3ddds/dds-file-layout-for-cubic-environment-maps
 from __future__ import annotations
 import enum
+import io
 import os
 import struct
 from typing import Any, List, Tuple, Union
@@ -34,6 +35,10 @@ class DDS:
     array_size: int
     # pixel data
     mipmaps: List[bytes]
+    # TODO: use same mipmap indexing style as VTF
+    # -- need to support dds.resource_dimension != 3
+    # mipmaps: Dict[Tuple[int, int, int], bytes]
+    # # ^ {(mip_index, cubemap_index, side_index): raw_mipmap_data}
 
     def __init__(self):
         self.mipmaps = list()
@@ -78,38 +83,49 @@ class DDS:
             child.save_as(f"{base_filename}.{i}.dds")
 
     @classmethod
+    def from_bytes(cls, raw_dds: bytes) -> DDS:
+        return cls.from_stream(io.BytesIO(raw_dds))
+
+    @classmethod
     def from_file(cls, filename: str) -> DDS:
-        out = cls()
-        out.filename = filename
         with open(filename, "rb") as dds_file:
-            # header
-            assert dds_file.read(4) == b"DDS "
-            assert read_struct(dds_file, "2I") == (0x7C, 0x000A1007)  # version?
-            out.size = read_struct(dds_file, "2I")
-            assert read_struct(dds_file, "2I") == (0x00010000, 0x01)  # pitch / linsize?
-            out.num_mipmaps = read_struct(dds_file, "I")
-            assert dds_file.read(44) == b"\0" * 44
-            assert read_struct(dds_file, "2I") == (0x20, 0x04)  # don't know, don't care
-            # DX10 extended header
-            assert dds_file.read(4) == b"DX10"
-            assert dds_file.read(20) == b"\0" * 20
-            assert read_struct(dds_file, "I") == 0x00401008  # idk, some flags?
-            assert dds_file.read(16) == b"\0" * 16
-            out.format = DXGI(read_struct(dds_file, "I"))
-            out.resource_dimension = read_struct(dds_file, "I")
-            out.misc_flag = read_struct(dds_file, "I")
-            out.array_size = read_struct(dds_file, "I")
-            assert dds_file.read(4) == b"\0" * 4  # reserved
-            # pixel data
-            if out.format == DXGI.BC6H_UF16:
-                mip_sizes = [max(1 << i, 4) ** 2 for i in range(out.num_mipmaps)]
-                for i in range(out.array_size):
-                    mipmaps = [
-                        dds_file.read(mip_size)
-                        for mip_size in reversed(mip_sizes)]
-                    out.mipmaps.extend(mipmaps[::-1])  # biggest first
-            else:
-                raise NotImplementedError("compression size unknown, cannot extract mipmaps")
+            out = cls.from_stream(dds_file)
+        out.filename = filename
+        return out
+
+    @classmethod
+    def from_stream(cls, dds_file: io.BytesIO) -> DDS:
+        out = cls()
+        # header
+        assert dds_file.read(4) == b"DDS "
+        assert read_struct(dds_file, "2I") == (0x7C, 0x000A1007)  # version?
+        out.size = read_struct(dds_file, "2I")
+        assert read_struct(dds_file, "2I") == (0x00010000, 0x01)  # pitch / linsize?
+        out.num_mipmaps = read_struct(dds_file, "I")
+        assert dds_file.read(44) == b"\0" * 44
+        assert read_struct(dds_file, "2I") == (0x20, 0x04)  # don't know, don't care
+        # DX10 extended header
+        assert dds_file.read(4) == b"DX10"
+        assert dds_file.read(20) == b"\0" * 20
+        assert read_struct(dds_file, "I") == 0x00401008  # idk, some flags?
+        assert dds_file.read(16) == b"\0" * 16
+        out.format = DXGI(read_struct(dds_file, "I"))
+        out.resource_dimension = read_struct(dds_file, "I")
+        out.misc_flag = read_struct(dds_file, "I")
+        out.array_size = read_struct(dds_file, "I")
+        assert dds_file.read(4) == b"\0" * 4  # reserved
+        # pixel data
+        if out.format == DXGI.BC6H_UF16:
+            mip_sizes = [max(1 << i, 4) ** 2 for i in range(out.num_mipmaps)]
+            for i in range(out.array_size):
+                mipmaps = [
+                    dds_file.read(mip_size)
+                    for mip_size in reversed(mip_sizes)]
+                out.mipmaps.extend(mipmaps[::-1])  # biggest first
+        else:
+            # TODO: UserWarning("compression size unknown, cannot extract mipmaps")
+            # TODO: UserWarning("use .read(offset, size) to get the mipmaps yourself")
+            return out  # exit early
         return out
 
     def save_as(self, filename: str):
