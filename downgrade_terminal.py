@@ -83,7 +83,10 @@ if __name__ == "__main__":
     r2_vtf.resources = {
         "Image Data": vtf.Resource(tag=b"\x30\x00\x00", flags=0x00, offset=None),
         "Cubemap Multiply Ambient": vtf.Resource(tag=b"CMA", flags=None, offset=None)}
-    r2_vtf.cma = vtf.CMA.from_data(*bsp.CUBEMAPS_AMBIENT_RCP)
+    if set(bsp.CUBEMAPS_AMBIENT_RCP) != {0.0}:
+        r2_vtf.cma = vtf.CMA.from_data(*bsp.CUBEMAPS_AMBIENT_RCP)
+    else:
+        r2_vtf.cma = vtf.CMA.from_data(*(1.0,) * r2_vtf.num_frames)
     # NOTE: vtf.VTF.save_as will calculate the correct offset
     # NOTE: ignoring CRC & CMA for now
     header_size = 80 + len(r2_vtf.resources) * 8
