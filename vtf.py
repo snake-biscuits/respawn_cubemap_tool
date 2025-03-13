@@ -194,6 +194,7 @@ class VTF:
         resources = [Resource.from_stream(vtf_file) for i in range(num_resources)]
         out.resources = {Resource.valid_tags[r.tag]: r for r in resources}
         assert vtf_file.tell() == header_size
+        # CMA
         if "Cubemap Multiply Ambient" in out.resources:
             out.cma = CMA.from_vtf_stream(out, vtf_file)
             vtf_file.seek(header_size)
@@ -204,15 +205,13 @@ class VTF:
         assert out.first_frame == 0
         assert "Image Data" in out.resources
         vtf_file.seek(out.resources["Image Data"].offset)
-        # Titanfall
-        if out.format == Format.RGBA_8888 and out.size == (64, 64):
-            mip_sizes = [(1 << i) ** 2 * 4 for i in range(out.num_mipmaps)]
-        # Titanfall 2
-        elif out.format == Format.BC6H_UF16 and out.size == (256, 256):
-            mip_sizes = [max(1 << i, 4) ** 2 for i in range(out.num_mipmaps)]
         # TODO: r1o 32x32 Format.DXT5 "cubemapdefault.vtf" (LDR)
         # TODO: r1o 32x32 Format.RGBA_16161616F "cubemapdefault.hdr.vtf" (HDR)
         # -- mip bytes are all zero afaik
+        if out.format == Format.RGBA_8888 and out.size == (64, 64):  # Titanfall
+            mip_sizes = [(1 << i) ** 2 * 4 for i in range(out.num_mipmaps)]
+        elif out.format == Format.BC6H_UF16 and out.size == (256, 256):  # Titanfall 2 / Apex Legends
+            mip_sizes = [max(1 << i, 4) ** 2 for i in range(out.num_mipmaps)]
         else:
             # TODO: UserWarning("use .read(offset, size) to get the mipmaps yourself")
             return out  # exit early
@@ -241,7 +240,8 @@ class VTF:
             "low_res_format": self.low_res_format.name,
             "low_res_size": self.low_res_size,
             "mipmap_depth": self.mipmap_depth,
-            "resources": {k: str(v) for k, v in self.resources.items()}}
+            "resources": {k: str(v) for k, v in self.resources.items()},
+            "cma": self.cma.as_json if self.cma is not None else None}
 
     def save_as(self, filename: str):
         assert self.version == (7, 5)
@@ -270,17 +270,29 @@ class VTF:
             write_struct(vtf_file, "I", len(self.resources))
             vtf_file.write(b"\0" * 8)
             # TODO: verify / calculate resource offsets
-            if set(self.resources.keys()) == {"Image Data"}:
-                self.resources["Image Data"].offset = header_size
-            else:
-                # "Cyclic Redundancy Check" stores it's data in "offset"
-                # if self.num_frames == 1: resources["Cubemap Mystery Attribute"] = cma_hash
-                # else: [cma_hash for i in range(self.num_frames)] w/ offset to data
-                # "Image Data" is always last!
-                raise NotImplementedError("idk how to generate CRC & CMA data")
+            offset = header_size  # vtf_header + 8 bytes per resource
+            if "Cyclic Redundancy Check" in self.resources:
+                # TODO: save crc32 in self.resources["Cyclic Redundany Check"].offset
+                raise NotImplementedError("idk how to generate CRC")
+            if "Cubemap Multiply Ambient" in self.resources:
+                assert self.cma is not None
+                assert len(self.cma.data) == self.num_frames
+                if self.num_frames == 1:
+                    self.resources["Cubemap Multiply Ambient"].flags = 0x02
+                    cma_0 = struct.pack("f", self.cma.data[0])
+                    self.resources["Cubemap Multiply Ambient"].offset = cma_0
+                else:
+                    self.resources["Cubemap Multiply Ambient"].flags = 0x00
+                    self.resources["Cubemap Multiply Ambient"].offset = offset
+                    offset += (self.num_frames + 1) * 4
+            # NOTE: Image Data is always last!
+            if "Image Data" in self.resources:
+                self.resources["Image Data"].offset = offset
             vtf_file.write(b"".join(r.as_bytes() for r in self.resources.values()))
             assert vtf_file.tell() == header_size
-            # TODO: resource data (CMA block)
+            # write cma
+            if self.cma is not None:
+                vtf_file.write(self.cma.as_bytes())
             # write mips
             assert "Image Data" in self.resources
             assert self.resources["Image Data"].offset == vtf_file.tell()
@@ -294,10 +306,21 @@ class VTF:
 
 class CMA:
     """same data as rBSP v48 CUBEMAPS_AMBIENT_RCP"""
-    ambient_rcps: List[float]
+    data: List[float]
 
     def __repr__(self) -> str:
         return f"<CMA with {len(self.data)} entries at 0x{id(self):012X}>"
+
+    def as_bytes(self) -> bytes:
+        if len(self.data) == 1:
+            return b""
+        return struct.pack(f"I{len(self.data)}f", len(self.data) * 4, *self.data)
+
+    @classmethod
+    def from_data(cls, *data: List[float]):
+        out = cls()
+        out.data = data
+        return out
 
     @classmethod
     def from_vtf_stream(cls, vtf: VTF, vtf_file: io.BytesIO):

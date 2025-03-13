@@ -16,13 +16,15 @@ def get_filepath(name: str, verify=os.path.isfile) -> str:
 
 
 if __name__ == "__main__":
+    import sys
+
     import dds
     import vtf
 
     print("-===- regen systems online -===-")
 
     # READ cubemaps_hdr.dds
-    # NOTE: could extract from mp_whatever.bsp.0028.bsp_lump
+    # NOTE: must be extracted from .rpak by user
     r5_dds = dds.DDS.from_file(get_filepath("cubemaps_hdr.dds"))
     r2_mips = dict()
     # ^ {(mipmap, cubemap, face): mip_bytes}
@@ -40,6 +42,29 @@ if __name__ == "__main__":
             # NOTE: mipmaps are reverse order in .dds
             # -- flipped the order in the DDS class so they line up
 
+    # IMPORT bsp_tool
+    bsp_tool_path = get_filepath("bsp_tool", verify=os.path.isdir)
+    sys.path.insert(0, bsp_tool_path)
+    import bsp_tool
+
+    def verify_bsp(filepath: str):
+        if os.path.isfile(filepath):
+            try:
+                bsp = bsp_tool.load_bsp(filepath)
+            except Exception:
+                return False
+            return (bsp.file_magic == b"rBSP" and bsp.version <= 48)
+        return False
+
+    # OPEN r5 .bsp
+    bsp_path = get_filepath("Apex Season 7+ .bsp", verify_bsp)
+    bsp = bsp_tool.load_bsp(bsp_path)
+    if bsp.headers["CUBEMAPS"].length == 0:
+        print("!!! ERROR !!! .bsp has no cubemaps")
+        exit()
+    assert len(bsp.CUBEMAPS_AMBIENT_RCP) == len(bsp.CUBEMAPS)
+    assert len(bsp.CUBEMAPS) == r5_dds.array_size // 6, "map does not match cubemaps_hdr.dds"
+
     # GENERATE cubemaps.hdr.vtf
     r2_vtf = vtf.VTF()
     # TODO: set the entire .vtf header
@@ -56,7 +81,9 @@ if __name__ == "__main__":
     r2_vtf.low_res_size = (0, 0)
     r2_vtf.mipmap_depth = 1
     r2_vtf.resources = {
-        "Image Data": vtf.Resource(tag=b"\x30\x00\x00", flags=0x00, offset=None)}
+        "Image Data": vtf.Resource(tag=b"\x30\x00\x00", flags=0x00, offset=None),
+        "Cubemap Multiply Ambient": vtf.Resource(tag=b"CMA", flags=None, offset=None)}
+    r2_vtf.cma = vtf.CMA.from_data(*bsp.CUBEMAPS_AMBIENT_RCP)
     # NOTE: vtf.VTF.save_as will calculate the correct offset
     # NOTE: ignoring CRC & CMA for now
     header_size = 80 + len(r2_vtf.resources) * 8
