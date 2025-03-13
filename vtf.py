@@ -90,7 +90,7 @@ class Resource:
         b"\x30\x00\x00": "Image Data",
         b"\x10\x00\x00": "Sprite Sheet",
         b"CRC": "Cyclic Redundancy Check",
-        b"CMA": "Cubemap Mystery Attributes",
+        b"CMA": "Cubemap Multiply Ambient",
         b"LOD": "Level of Detail Information",
         b"TSO": "Extended Flags",
         b"KVD": "Key Values Data"}
@@ -194,7 +194,7 @@ class VTF:
         resources = [Resource.from_stream(vtf_file) for i in range(num_resources)]
         out.resources = {Resource.valid_tags[r.tag]: r for r in resources}
         assert vtf_file.tell() == header_size
-        if "Cubemap Mystery Attributes" in out.resources:
+        if "Cubemap Multiply Ambient" in out.resources:
             out.cma = CMA.from_vtf_stream(out, vtf_file)
             vtf_file.seek(header_size)
         # mipmaps
@@ -293,22 +293,21 @@ class VTF:
 
 
 class CMA:
-    data: List[int]
+    """same data as rBSP v48 CUBEMAPS_AMBIENT_RCP"""
+    ambient_rcps: List[float]
 
     def __repr__(self) -> str:
         return f"<CMA with {len(self.data)} entries at 0x{id(self):012X}>"
 
     @classmethod
     def from_vtf_stream(cls, vtf: VTF, vtf_file: io.BytesIO):
-        assert "Cubemap Mystery Attributes" in vtf.resources
-        resource = vtf.resources["Cubemap Mystery Attributes"]
+        resource = vtf.resources["Cubemap Multiply Ambient"]
         out = cls()
-        if resource.flags == 0x02:  # no data
-            out.data = [resource.offset]
+        if resource.flags == 0x02:  # no more data to read
+            out.data = struct.pack("f", resource.offset.to_bytes(4, "little"))
         else:
-            num_ints = vtf.num_frames + 1
             vtf_file.seek(resource.offset)
-            size, *out.data = read_struct(vtf_file, f"{num_ints}I")
+            size, *out.data = read_struct(vtf_file, f"I{vtf.num_frames}f")
             assert size == vtf.num_frames * 4
         return out
 
