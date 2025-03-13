@@ -53,7 +53,7 @@ if __name__ == "__main__":
                 bsp = bsp_tool.load_bsp(filepath)
             except Exception:
                 return False
-            return (bsp.file_magic == b"rBSP" and bsp.version <= 48)
+            return (bsp.file_magic == b"rBSP" and bsp.version >= 48)
         return False
 
     # OPEN r5 .bsp
